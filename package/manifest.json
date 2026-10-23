@@ -1,0 +1,10 @@
+{
+  "name": "AmmoVariants",
+  "version_number": "1.0.0",
+  "website_url": "https://github.com/Ononononoki/AmmoVariants",
+  "description": "Adds 42 scatter, piercing and energy arrows and bolts, with tiered recipes, distinct firing sounds and gold or lightning trails. Gameplay settings are server synced. Required on the server and every client.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2351",
+    "ValheimModding-Jotunn-2.30.2"
+  ]
+}

@@ -1,0 +1,16 @@
+# only these public files are ever committed: the source, the project, the Thunderstore texts and icon.
+# notes, research, tests, tools, builds and zips stay on the developer's computer
+*
+!*/
+!.gitignore
+!/LICENSE
+!/README.md
+!/AmmoVariants.csproj
+!/src/*.cs
+!/package/manifest.json
+!/package/README.md
+!/package/CHANGELOG.md
+!/package/icon.png
+!/art/icons/*.png
+!/art/audio/*.wav
+!/art/ammo_visuals
