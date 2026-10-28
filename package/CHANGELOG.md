@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Mod page text corrected. The trails take the color of their material or element, the old text said gold or lightning.
+
 ## 1.0.0
 
 - First public release with 42 scatter, piercing and energy arrows and bolts.

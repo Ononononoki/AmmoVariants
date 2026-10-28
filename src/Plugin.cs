@@ -17,7 +17,7 @@ namespace AmmoVariants
     {
         public const string ModGuid = "com.onononoki.ammovariants";
         public const string ModName = "AmmoVariants";
-        public const string ModVersion = "1.0.0";
+        public const string ModVersion = "1.0.1";
 
         internal static Plugin Instance;
         internal static BepInEx.Logging.ManualLogSource Log;
