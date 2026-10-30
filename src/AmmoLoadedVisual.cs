@@ -92,12 +92,21 @@ namespace AmmoVariants
     internal static class AmmoWeaponLoadPatch
     {
         private static readonly AccessTools.FieldRef<WeaponLoadState, Player> Owner = AccessTools.FieldRefAccess<WeaponLoadState, Player>("m_owner");
+        private static readonly System.Collections.Generic.HashSet<string> Skipped = new System.Collections.Generic.HashSet<string>();
 
         private static void Postfix(WeaponLoadState __instance)
         {
             var player = Owner(__instance);
             if (player == null || __instance.m_loaded == null) return;
             var ammo = player.GetAmmoItem();
+            // the equipped ammo shows only on a weapon that shoots it, not on the grappling hook's loaded bolt
+            var weapon = player.GetCurrentWeapon();
+            if (ammo != null && (weapon == null || weapon.m_shared.m_ammoType != ammo.m_shared.m_ammoType))
+            {
+                if (Plugin.LogCounters.Value && Items.KindOf(ammo) != Items.AmmoKind.None && Skipped.Add(weapon?.m_shared.m_name ?? ""))
+                    Plugin.Log.LogInfo($"loaded variant model skipped on {weapon?.m_shared.m_name}, it shoots '{weapon?.m_shared.m_ammoType}', the ammo is '{ammo.m_shared.m_ammoType}'");
+                ammo = null;
+            }
             var component = __instance.GetComponent<AmmoLoadedVisual>();
             if (component == null && Items.KindOf(ammo) == Items.AmmoKind.None) return;
             if (component == null) component = __instance.gameObject.AddComponent<AmmoLoadedVisual>();

@@ -16,11 +16,15 @@ namespace AmmoVariants
         private static ConfigEntry<bool> piercing;
         private static ConfigEntry<bool> energy;
         private static ConfigEntry<bool> ballista;
+        private static ConfigEntry<bool> explosive;
+        private static ConfigEntry<bool> shaftHeat;
 
         internal static bool Scatter => scatter?.Value ?? true;
         internal static bool Piercing => piercing?.Value ?? true;
         internal static bool Energy => energy?.Value ?? true;
         internal static bool Ballista => ballista?.Value ?? true;
+        internal static bool Explosive => explosive?.Value ?? true;
+        internal static bool ShaftHeat => shaftHeat?.Value ?? true;
 
         internal static void Bind(ConfigFile config)
         {
@@ -29,6 +33,8 @@ namespace AmmoVariants
             piercing = config.Bind("Trails","Piercing",true,description);
             energy = config.Bind("Trails","Energy",true,description);
             ballista = config.Bind("Trails","Ballista",true,"Show material-colored trails on existing ballista bolts. Mechanics stay unchanged. Requires restart.");
+            explosive = config.Bind("Trails","Explosive",true,"Show the flames on explosive arrows and bolts. Requires restart.");
+            shaftHeat = config.Bind("Trails","ShaftHeat",true,"Show the red-hot head and charge area, the black char and the soot fading into the shaft on early and plains explosive arrows and bolts. Requires restart.");
         }
     }
 }

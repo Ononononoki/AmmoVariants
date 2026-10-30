@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0
+
+- New explosive arrows and bolts in three tiers: fire arrow and bone bolt, needle arrow and black metal bolt, Charred arrow and bolt.
+- An explosive shot sticks where it hits, deals 30% of a shot as pierce and fire, and blows up 1.25 seconds later. The blast deals 125% of a full draw shot as blunt and fire, with chop and pickaxe damage at the tier's tool level.
+- Explosive ammo never hurts you, other players without PvP or tames, and spares buildings, trees and rocks inside a workbench's range. Shots into water are duds.
+- Each tier has its own charge model, flames, firing sounds, blast sound and blast size. The early and plains tiers have a red-hot head and charge area, a black charred band and soot fading into the shaft.
+- Item texts are one short line per kind and show the ammo's own damage of one projectile as count x value in whole numbers, like a vanilla arrow, with the equipped bow or crossbow's value in a light blue bracket. Explosive ammo adds its blast and blast radius.
+- Fixed: the grappling hook no longer shows equipped mod ammo on it.
+
 ## 1.0.1
 
 - Mod page text corrected. The trails take the color of their material or element, the old text said gold or lightning.

@@ -19,6 +19,17 @@ namespace AmmoVariants
         internal readonly HashSet<Character> Creatures = new HashSet<Character>();
         internal bool NewHit;
         internal HitData.DamageTypes BaseDamage;
+        // explosive shots: the fuse after the hit and the blast's damage from the full draw shot
+        internal ExplosiveTier Tier;
+        internal bool Bolt;
+        internal bool Stuck;
+        internal bool Dud;
+        internal bool Exploded;
+        internal float Fuse;
+        internal Vector3 LastPosition;
+        internal HitData.DamageTypes BlastDamage;
+        internal Character Owner;
+        internal ItemDrop.ItemData Ammo;
     }
 
     // the scatter, piercing and energy rules. all hooks are on the vanilla shot path.
@@ -49,6 +60,10 @@ namespace AmmoVariants
         private static readonly AccessTools.FieldRef<Attack, ItemDrop.ItemData> WeaponRef =
             AccessTools.FieldRefAccess<Attack, ItemDrop.ItemData>("m_weapon");
         private static readonly AccessTools.FieldRef<Attack, Humanoid> CharacterRef = AccessTools.FieldRefAccess<Attack, Humanoid>("m_character");
+        private static readonly AccessTools.FieldRef<Attack, float> DrawRef = AccessTools.FieldRefAccess<Attack, float>("m_attackDrawPercentage");
+
+        // the bow draw of the burst being fired, 1 for weapons without a draw.
+        private static float burstDraw = 1f;
         private static readonly AccessTools.FieldRef<Humanoid, bool> SecondaryRef = AccessTools.FieldRefAccess<Humanoid, bool>("m_currentAttackIsSecondary");
 
         private static readonly FieldInfo RaySolids = AccessTools.Field(typeof(Projectile), "s_rayMaskSolids");
@@ -117,12 +132,14 @@ namespace AmmoVariants
         {
             FiringSecondary = BsmInstalled && IsSecondary(attack);
             burstSoundPending = true;
+            burstDraw = attack.m_bowDraw ? DrawRef(attack) : 1f;
         }
 
         internal static void EndBurst()
         {
             FiringSecondary = false;
             burstSoundPending = false;
+            burstDraw = 1f;
         }
 
         internal static int ConsumeSound(Items.AmmoKind kind, bool crossbow)
@@ -263,19 +280,23 @@ namespace AmmoVariants
             if (kind == Items.AmmoKind.None) { LogSetup(ammo, weapon, kind, native, native); States.Remove(projectile); return; }
             var st = new ShotState { Kind = kind, Origin = projectile.transform.position };
             if (Plugin.LogCounters.Value) Plugin.Log.LogInfo($"setup {ammo?.m_shared?.m_name} kind {kind}");
+            // the whole numbers of the item text, times what skill, draw and effects did to this shot
+            var shot = BaseShot(weapon, ammo != null ? ammo.GetDamage() : new HitData.DamageTypes());
+            float fired = FiredFactor(native, shot);
 
             switch (kind)
             {
                 case Items.AmmoKind.Energy:
                     // energy passes creatures, the vanilla terrain stop is set so only AfterHit decides a stop.
                     projectile.m_onlyStopOnTerrain = true;
-                    projectile.m_damage = EnergyDamage(projectile.m_damage, Plugin.EnergyLightningShare.Value, Plugin.EnergyPierceShare.Value, Plugin.EnergyFireShare.Value);
+                    projectile.m_damage = fired > 0f ? Scaled(PerProjectile(kind, shot, false), fired)
+                        : EnergyDamage(projectile.m_damage, Plugin.EnergyLightningShare.Value, Plugin.EnergyPierceShare.Value, Plugin.EnergyFireShare.Value);
                     break;
                 case Items.AmmoKind.Scatter:
                 {
                     bool crossbow = IsCrossbow(weapon);
                     float share = crossbow ? Plugin.ScatterShareCrossbow.Value : Plugin.ScatterShareBow.Value;
-                    projectile.m_damage = Scaled(projectile.m_damage, share);
+                    projectile.m_damage = fired > 0f ? Scaled(PerProjectile(kind, shot, crossbow), fired) : Scaled(projectile.m_damage, share);
                     // one volley gives the weapon's skill gain once: every pellet takes its share.
                     projectile.m_raiseSkillAmount /= crossbow ? Plugin.ScatterPellets.Value : Plugin.ScatterBowPellets.Value;
                     projectile.m_attackForce *= share;
@@ -289,13 +310,33 @@ namespace AmmoVariants
                     }
                     break;
                 }
+                case Items.AmmoKind.Explosive:
+                {
+                    // the impact follows the draw like any shot, the blast takes the shot as if fully drawn
+                    st.Tier = Explosive.TierOf(ammo?.m_shared?.m_attack?.m_attackProjectile);
+                    st.Bolt = st.Tier?.Bolt ?? ammo?.m_shared?.m_ammoType == "$ammo_bolts";
+                    st.Owner = OwnerRef(projectile);
+                    st.Ammo = ammo;
+                    st.BlastDamage = fired > 0f ? Scaled(BlastBase(shot), fired * Explosive.FullDrawFactor(burstDraw))
+                        : Explosive.BlastDamage(Scaled(native, Explosive.FullDrawFactor(burstDraw)), Plugin.ExplosiveBlastBluntShare.Value,
+                        Plugin.ExplosiveBlastFireShare.Value, Plugin.ExplosiveBlastChopShare.Value, Plugin.ExplosiveBlastPickaxeShare.Value);
+                    projectile.m_damage = fired > 0f ? Scaled(PerProjectile(kind, shot, st.Bolt), fired)
+                        : Explosive.ImpactDamage(native, Plugin.ExplosiveImpactPierceShare.Value, Plugin.ExplosiveImpactFireShare.Value, Plugin.ExplosiveImpactToolShare.Value);
+                    projectile.m_stayTTL = Plugin.ExplosiveFuse.Value + Explosive.StayAfterFuse;
+                    // slower and heavier than whatever the game and other mods gave the shot
+                    Vel(projectile) *= st.Bolt ? Plugin.ExplosiveBoltSpeedFactor.Value : st.Tier != null && st.Tier.Early ? Plugin.ExplosiveEarlyArrowSpeedFactor.Value
+                        : st.Tier != null && st.Tier.Plains ? Plugin.ExplosivePlainsArrowSpeedFactor.Value : Plugin.ExplosiveArrowSpeedFactor.Value;
+                    projectile.m_gravity = st.Bolt ? Plugin.ExplosiveBoltGravity.Value : Plugin.ExplosiveArrowGravity.Value;
+                    if (Plugin.LogCounters.Value) Plugin.Log.LogInfo($"explosive setup {(st.Tier != null && st.Tier.Early ? "early " : st.Tier != null && st.Tier.Plains ? "plains " : "")}{(st.Bolt ? "bolt" : "arrow")}, draw {burstDraw:F2}, speed {Vel(projectile).magnitude:F1} m/s, gravity {projectile.m_gravity:F1}, blast [{Describe(st.BlastDamage)}]");
+                    break;
+                }
                 case Items.AmmoKind.Piercing:
                     // the vanilla pass rule stays for shots that BowSecondaryMultishot pierces itself.
                     st.Pierce = !BsmPierces(false);
                     if (st.Pierce)
                     {
                         projectile.m_onlyStopOnTerrain = true;
-                        projectile.m_damage = PiercingDamage(projectile.m_damage, Plugin.PierceDamageShare.Value);
+                        projectile.m_damage = fired > 0f ? Scaled(PerProjectile(kind, shot, false), fired) : PiercingDamage(projectile.m_damage, Plugin.PierceDamageShare.Value);
                         if (Plugin.LogCounters.Value) Plugin.Log.LogInfo($"pierce initial damage share {Plugin.PierceDamageShare.Value:F2}, limit {Plugin.PierceMaxCreatures.Value}, creature loss {Plugin.PierceLossPerCreature.Value:F2}");
                     }
                     break;
@@ -309,6 +350,9 @@ namespace AmmoVariants
             if (view != null && view.IsValid() && view.IsOwner())
             {
                 int sound = ConsumeSound(kind, IsCrossbow(weapon));
+                // early explosive ammo has its own lighter firing sounds two codes up, plains ammo its middle ones four up
+                if (sound >= 2 && st.Tier != null && st.Tier.Early) sound += 2;
+                else if (sound >= 2 && st.Tier != null && st.Tier.Plains) sound += 4;
                 view.GetZDO().Set(SoundKey, sound);
                 if (sound >= 2) view.GetZDO().Set(SoundKey + ".Origin", st.Origin);
                 if (sound >= 2)
@@ -321,7 +365,7 @@ namespace AmmoVariants
         }
 
         // energy damage falls with the distance from the shot's origin, nothing else changes it.
-        internal static bool BeforeHit(Projectile projectile, Collider collider, Vector3 hitPoint)
+        internal static bool BeforeHit(Projectile projectile, Collider collider, Vector3 hitPoint, bool water)
         {
             if (!States.TryGetValue(projectile, out var st))
             {
@@ -341,6 +385,16 @@ namespace AmmoVariants
             }
             if (st.Pierce && st.NewHit && (creature == null || PierceEnds(st.Passed + 1, Plugin.PierceMaxCreatures.Value)))
                 projectile.m_onlyStopOnTerrain = false;
+
+            // an explosive shot sticks where it hits and its fuse starts, water drowns it
+            if (st.Kind == Items.AmmoKind.Explosive && !st.Stuck && !st.Dud)
+            {
+                st.Dud = water;
+                st.Stuck = !water;
+                st.Fuse = Plugin.ExplosiveFuse.Value;
+                st.LastPosition = hitPoint;
+                if (Plugin.LogCounters.Value) Plugin.Log.LogInfo(water ? "explosive dud, the shot hit water" : $"explosive fuse {st.Fuse:F2} s, stuck in {(creature != null ? creature.m_name : collider != null ? collider.name : "nothing")}");
+            }
 
             if (st.Kind != Items.AmmoKind.Energy) { LogHit(projectile, st, creature); return true; }
 
@@ -402,6 +456,7 @@ namespace AmmoVariants
         {
             if (!States.TryGetValue(projectile, out var st)) return;
             if (projectile.m_ttl <= Time.fixedDeltaTime) projectile.GetComponent<AmmoTrailLifetime>()?.Detach();
+            if (st.Kind == Items.AmmoKind.Explosive) { Explosive.Tick(projectile, st); return; }
             if (st.Kind != Items.AmmoKind.Energy) return;
 
             if (EnergyEnded(Vector3.Distance(projectile.transform.position, st.Origin), Plugin.EnergyRange.Value))
@@ -409,6 +464,12 @@ namespace AmmoVariants
                 projectile.GetComponent<AmmoTrailLifetime>()?.Detach();
                 projectile.m_ttl = 0.0001f;
             }
+        }
+
+        // a stuck explosive shot removed before its fuse ended, only the owner holds its state.
+        internal static void ExplosiveRemoved(Projectile projectile)
+        {
+            if (States.TryGetValue(projectile, out var st) && st.Kind == Items.AmmoKind.Explosive) Explosive.Removed(projectile, st);
         }
 
         // damage share at a distance: 1 at 0 m, atRange at the range, linear in between.
@@ -450,6 +511,127 @@ namespace AmmoVariants
             copy.m_pickaxe = damage.m_pickaxe;
             return copy;
         }
+
+        // the shot before skill, draw and effects: the weapon's damage plus the ammo's, added as the game does.
+        internal static HitData.DamageTypes BaseShot(ItemDrop.ItemData weapon, HitData.DamageTypes ammo)
+        {
+            var shot = weapon != null ? weapon.GetDamage() : new HitData.DamageTypes();
+            shot.Add(ammo, 1);
+            return shot;
+        }
+
+        // every channel rounded up to a whole point, the slack keeps float noise like 28.00001 at 28.
+        internal static HitData.DamageTypes Whole(HitData.DamageTypes damage)
+        {
+            float Up(float value) => value > 0f ? (float)System.Math.Ceiling(value - WholeSlack) : value;
+            return new HitData.DamageTypes
+            {
+                m_damage = Up(damage.m_damage), m_blunt = Up(damage.m_blunt), m_slash = Up(damage.m_slash), m_pierce = Up(damage.m_pierce),
+                m_chop = Up(damage.m_chop), m_pickaxe = Up(damage.m_pickaxe), m_fire = Up(damage.m_fire), m_frost = Up(damage.m_frost),
+                m_lightning = Up(damage.m_lightning), m_poison = Up(damage.m_poison), m_spirit = Up(damage.m_spirit), m_nonPlayer = Up(damage.m_nonPlayer)
+            };
+        }
+
+        private const float WholeSlack = 0.001f;
+
+        // one projectile from the base shot in whole points, the same numbers the item text shows.
+        internal static HitData.DamageTypes PerProjectile(Items.AmmoKind kind, HitData.DamageTypes shot, bool crossbow)
+        {
+            switch (kind)
+            {
+                case Items.AmmoKind.Scatter:
+                    return Whole(Scaled(shot, crossbow ? Plugin.ScatterShareCrossbow.Value : Plugin.ScatterShareBow.Value));
+                case Items.AmmoKind.Piercing:
+                    return Whole(PiercingDamage(shot, Plugin.PierceDamageShare.Value));
+                case Items.AmmoKind.Energy:
+                    return Whole(EnergyDamage(shot, Plugin.EnergyLightningShare.Value, Plugin.EnergyPierceShare.Value, Plugin.EnergyFireShare.Value));
+                case Items.AmmoKind.Explosive:
+                    return Whole(Explosive.ImpactDamage(shot, Plugin.ExplosiveImpactPierceShare.Value, Plugin.ExplosiveImpactFireShare.Value, Plugin.ExplosiveImpactToolShare.Value));
+                default:
+                    return shot;
+            }
+        }
+
+        // the blast core from the full draw base shot in whole points.
+        internal static HitData.DamageTypes BlastBase(HitData.DamageTypes shot)
+        {
+            return Whole(Explosive.BlastDamage(shot, Plugin.ExplosiveBlastBluntShare.Value, Plugin.ExplosiveBlastFireShare.Value,
+                Plugin.ExplosiveBlastChopShare.Value, Plugin.ExplosiveBlastPickaxeShare.Value));
+        }
+
+        // how far skill, draw and effects moved the fired shot from its base, by combat damage. 0 without a base.
+        internal static float FiredFactor(HitData.DamageTypes fired, HitData.DamageTypes shot)
+        {
+            float start = Explosive.Combat(shot);
+            return start > 0f ? Explosive.Combat(fired) / start : 0f;
+        }
+
+        // the item text of our ammo: the vanilla damage lines become one projectile, count x value, of the ammo's own damage like a
+        // vanilla arrow's (scatter arrows as a bow's spread, scatter bolts as a crossbow's). with the bow or crossbow that shoots it
+        // each line adds the value with the weapon's damage in, in a light blue bracket. explosive adds one blast line and its radius.
+        internal static string Tooltip(ItemDrop.ItemData item, int quality, float worldLevel, string text)
+        {
+            var kind = Items.KindOf(item);
+            if (kind == Items.AmmoKind.None || string.IsNullOrEmpty(text)) return text;
+            var ammo = item.GetDamage(quality, worldLevel);
+            string vanilla = ammo.GetTooltipString(item.m_shared.m_skillType);
+            int at = string.IsNullOrEmpty(vanilla) ? -1 : text.IndexOf(vanilla, System.StringComparison.Ordinal);
+            if (at < 0) return text;
+            var player = Player.m_localPlayer;
+            var weapon = player != null ? player.GetCurrentWeapon() : null;
+            if (weapon != null && weapon.m_shared.m_ammoType != item.m_shared.m_ammoType) weapon = null;
+            bool crossbow = item.m_shared.m_ammoType == "$ammo_bolts";
+            float low = 1f, high = 1f;
+            if (player != null) player.GetSkills().GetRandomSkillRange(out low, out high, item.m_shared.m_skillType);
+            var shot = BaseShot(null, ammo);
+            var one = PerProjectile(kind, shot, crossbow);
+            var armedShot = weapon != null ? BaseShot(weapon, ammo) : new HitData.DamageTypes();
+            var armed = weapon != null ? PerProjectile(kind, armedShot, IsCrossbow(weapon)) : new HitData.DamageTypes();
+            string tag = weapon == null ? null : IsCrossbow(weapon) ? "crossbow" : "bow";
+            int count = kind == Items.AmmoKind.Scatter ? (crossbow ? Plugin.ScatterPellets.Value : Plugin.ScatterBowPellets.Value) : 1;
+            var lines = new System.Text.StringBuilder();
+            DamageLines(lines, one, armed, tag, count, low, high);
+            if (kind == Items.AmmoKind.Explosive)
+            {
+                var tier = Explosive.TierOf(item.m_shared.m_attack.m_attackProjectile);
+                bool early = tier != null && tier.Early, plains = tier != null && tier.Plains, bolt = tier != null && tier.Bolt;
+                float core = early ? (bolt ? Plugin.ExplosiveEarlyBoltCoreRadius.Value : Plugin.ExplosiveEarlyArrowCoreRadius.Value)
+                    : plains ? (bolt ? Plugin.ExplosivePlainsBoltCoreRadius.Value : Plugin.ExplosivePlainsArrowCoreRadius.Value)
+                    : bolt ? Plugin.ExplosiveBoltCoreRadius.Value : Plugin.ExplosiveArrowCoreRadius.Value;
+                float radius = early ? (bolt ? Plugin.ExplosiveEarlyBoltRadius.Value : Plugin.ExplosiveEarlyArrowRadius.Value)
+                    : plains ? (bolt ? Plugin.ExplosivePlainsBoltRadius.Value : Plugin.ExplosivePlainsArrowRadius.Value)
+                    : bolt ? Plugin.ExplosiveBoltRadius.Value : Plugin.ExplosiveArrowRadius.Value;
+                Line(lines, "Blast", Explosive.Combat(BlastBase(shot)), weapon != null ? Explosive.Combat(BlastBase(armedShot)) : 0f, tag, 1, low, high);
+                lines.Append("\nBlast radius: <color=orange>").Append(core.ToString("0.##")).Append('-').Append(radius.ToString("0.##")).Append(" m</color>");
+            }
+            return text.Remove(at, vanilla.Length).Insert(at, lines.ToString());
+        }
+
+        // the game's damage lines with the skill range, count x value when a shot has several projectiles, and the weapon's bracket.
+        private static void DamageLines(System.Text.StringBuilder lines, HitData.DamageTypes damage, HitData.DamageTypes armed, string tag, int count, float low, float high)
+        {
+            Line(lines, "$inventory_damage", damage.m_damage, armed.m_damage, tag, count, low, high); Line(lines, "$inventory_blunt", damage.m_blunt, armed.m_blunt, tag, count, low, high);
+            Line(lines, "$inventory_slash", damage.m_slash, armed.m_slash, tag, count, low, high); Line(lines, "$inventory_pierce", damage.m_pierce, armed.m_pierce, tag, count, low, high);
+            Line(lines, "$inventory_fire", damage.m_fire, armed.m_fire, tag, count, low, high); Line(lines, "$inventory_frost", damage.m_frost, armed.m_frost, tag, count, low, high);
+            Line(lines, "$inventory_lightning", damage.m_lightning, armed.m_lightning, tag, count, low, high); Line(lines, "$inventory_poison", damage.m_poison, armed.m_poison, tag, count, low, high);
+            Line(lines, "$inventory_spirit", damage.m_spirit, armed.m_spirit, tag, count, low, high);
+        }
+
+        // the ammo's own value, then [bow 21] with the equipped weapon (with the count too when only the weapon has this damage)
+        private static void Line(System.Text.StringBuilder lines, string label, float value, float armed, string tag, int count, float low, float high)
+        {
+            bool bracket = tag != null && armed > 0f;
+            if (value <= 0f && !bracket) return;
+            lines.Append('\n').Append(label).Append(": ");
+            if (value > 0f)
+                lines.Append("<color=orange>").Append(count > 1 ? count + " x " : "").Append(Mathf.RoundToInt(value))
+                    .Append("</color> <color=yellow>(").Append(Mathf.RoundToInt(value * low)).Append('-').Append(Mathf.RoundToInt(value * high)).Append(") </color>");
+            if (bracket)
+                lines.Append("<color=").Append(BracketColor).Append(">[").Append(tag).Append(' ').Append(value <= 0f && count > 1 ? count + " x " : "")
+                    .Append(Mathf.RoundToInt(armed)).Append("]</color>");
+        }
+
+        private const string BracketColor = "#8FD3FF";
 
         private const int OrdinaryLogLimit = 15;
         private const int VariantLogLimitPerAmmo = 20;

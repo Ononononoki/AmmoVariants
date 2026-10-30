@@ -11,12 +11,25 @@ namespace AmmoVariants
     internal static class AmmoAssets
     {
         private static readonly Dictionary<string, Sprite> Icons = new Dictionary<string, Sprite>();
-        private static readonly Dictionary<int, AudioClip> Sounds = new Dictionary<int, AudioClip>();
+        private static readonly Dictionary<int, AudioClip[]> Sounds = new Dictionary<int, AudioClip[]>();
+        internal const int ExplosiveBowSounds = 4;
+        internal const int ExplosiveCrossbowSounds = 6;
+        internal const int ExplosiveEarlySounds = 3;
+        internal const int ExplosivePlainsSounds = 3;
+        internal static AudioClip BlastArrow;
+        internal static AudioClip BlastBolt;
+        internal static AudioClip EarlyBlastArrow;
+        internal static AudioClip EarlyBlastBolt;
+        internal static AudioClip PlainsBlastArrow;
+        internal static AudioClip PlainsBlastBolt;
+        private static AudioClip fuse;
         private static readonly Dictionary<GameObject, GameObject> ReleaseSounds = new Dictionary<GameObject, GameObject>();
         private static readonly Dictionary<EffectList, EffectList> QuietEffects = new Dictionary<EffectList, EffectList>();
         private static readonly MethodInfo CloneEffect = typeof(object).GetMethod("MemberwiseClone", BindingFlags.Instance | BindingFlags.NonPublic);
         private static AssetBundle bundle;
         internal static Shader TrailShader;
+        internal static Shader HeatShader;
+        internal static Shader SootShader;
 
         internal static byte[] Bytes(string suffix)
         {
@@ -32,12 +45,33 @@ namespace AmmoVariants
             bundle = AssetBundle.LoadFromMemory(Bytes("ammo_visuals"));
             TrailShader = bundle.LoadAsset<Shader>("Assets/AmmoTrail.shader");
             if (TrailShader == null) throw new InvalidOperationException("ammo trail shader unavailable");
+            HeatShader = bundle.LoadAsset<Shader>("Assets/AmmoShaftHeat.shader");
+            SootShader = bundle.LoadAsset<Shader>("Assets/AmmoShaftSoot.shader");
+            if (HeatShader == null || SootShader == null || !HeatShader.isSupported || !SootShader.isSupported)
+                Plugin.Log.LogWarning("shaft heat shaders unavailable, explosive ammo keeps the plain shaft");
             foreach (string baseName in Items.BoltBases.Concat(Items.ArrowBases))
                 foreach (string kind in new[] { "Scatter", "Piercing" }) LoadIcon(baseName + kind);
             foreach (string baseName in Items.EnergyBases) LoadIcon(baseName + "Energy");
+            foreach (string baseName in Items.ExplosiveBases) LoadIcon(baseName + "Explosive");
             string[] soundNames = { "scatter_bow", "scatter_crossbow", "piercing_bow", "piercing_crossbow", "energy_bow", "energy_crossbow" };
-            for (int i = 0; i < soundNames.Length; i++) Sounds.Add(i + 2, LoadWave(soundNames[i]));
-            Plugin.Log.LogInfo("loaded 42 ammo icons, six firing sounds and transparent trail shader");
+            for (int i = 0; i < soundNames.Length; i++) Sounds.Add(i + 2, new[] { LoadWave(soundNames[i]) });
+            // explosive firing picks one of several mechanical variations at random, codes follow Shots.ConsumeSound
+            Sounds.Add(2 + ((int)Items.AmmoKind.Explosive - 1) * 2, Enumerable.Range(1, ExplosiveBowSounds).Select(i => LoadWave("explosive_bow_" + i)).ToArray());
+            Sounds.Add(3 + ((int)Items.AmmoKind.Explosive - 1) * 2, Enumerable.Range(1, ExplosiveCrossbowSounds).Select(i => LoadWave("explosive_crossbow_" + i)).ToArray());
+            // early explosive firing sits two codes above the charred one, see Shots.OnSetup
+            Sounds.Add(4 + ((int)Items.AmmoKind.Explosive - 1) * 2, Enumerable.Range(1, ExplosiveEarlySounds).Select(i => LoadWave("explosive_early_bow_" + i)).ToArray());
+            Sounds.Add(5 + ((int)Items.AmmoKind.Explosive - 1) * 2, Enumerable.Range(1, ExplosiveEarlySounds).Select(i => LoadWave("explosive_early_crossbow_" + i)).ToArray());
+            // plains explosive firing sits four codes above the charred one, between the charred and the early weight
+            Sounds.Add(6 + ((int)Items.AmmoKind.Explosive - 1) * 2, Enumerable.Range(1, ExplosivePlainsSounds).Select(i => LoadWave("explosive_plains_bow_" + i)).ToArray());
+            Sounds.Add(7 + ((int)Items.AmmoKind.Explosive - 1) * 2, Enumerable.Range(1, ExplosivePlainsSounds).Select(i => LoadWave("explosive_plains_crossbow_" + i)).ToArray());
+            BlastArrow = LoadWave("explosive_blast_arrow");
+            BlastBolt = LoadWave("explosive_blast_bolt");
+            EarlyBlastArrow = LoadWave("explosive_early_blast_arrow");
+            EarlyBlastBolt = LoadWave("explosive_early_blast_bolt");
+            PlainsBlastArrow = LoadWave("explosive_plains_blast_arrow");
+            PlainsBlastBolt = LoadWave("explosive_plains_blast_bolt");
+            fuse = LoadWave("explosive_fuse");
+            Plugin.Log.LogInfo($"loaded {Icons.Count} ammo icons, {Sounds.Values.Sum(s => s.Length)} firing sounds, explosive blast and fuse sounds and transparent trail shader");
         }
 
         private static void LoadIcon(string name)
@@ -140,17 +174,35 @@ namespace AmmoVariants
         internal static void Play(int code, Vector3 position)
         {
             if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) return;
-            if (!Sounds.TryGetValue(code, out var clip) || Plugin.FiringSoundVolume.Value <= 0f) return;
-            string prefabName = (code & 1) == 0 ? "sfx_bow_fire" : "sfx_arbalest_fire";
+            if (!Sounds.TryGetValue(code, out var clips) || Plugin.FiringSoundVolume.Value <= 0f) return;
+            var clip = clips[UnityEngine.Random.Range(0, clips.Length)];
+            var holder = Sound("AmmoFiringSound", clip, (code & 1) == 0 ? "sfx_bow_fire" : "sfx_arbalest_fire");
+            if (holder == null) return;
+            holder.transform.position = position;
+            if (Plugin.LogCounters.Value) Plugin.Log.LogInfo("ammo firing sound " + clip.name);
+        }
+
+        // the fuse hiss rides on the stuck shot, the blast removes it with the shot.
+        internal static void PlayFuse(Transform shot)
+        {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null || fuse == null) return;
+            var holder = Sound("AmmoFuseSound", fuse, "sfx_bow_fire");
+            if (holder == null) return;
+            holder.transform.SetParent(shot, false);
+            if (Plugin.LogCounters.Value) Plugin.Log.LogInfo("explosive fuse sound on " + shot.name);
+        }
+
+        // an audio source on the game's SFX mixer, removed after the clip.
+        private static GameObject Sound(string name, AudioClip clip, string prefabName)
+        {
             var prefab = PrefabManager.Instance.GetPrefab(prefabName) ?? PrefabManager.Instance.GetPrefab("sfx_bow_fire");
             var template = prefab != null ? prefab.GetComponentInChildren<AudioSource>(true) : null;
             if (template == null || template.outputAudioMixerGroup == null)
             {
-                Plugin.Log.LogWarning("ammo firing sound skipped because the game SFX mixer was unavailable");
-                return;
+                Plugin.Log.LogWarning("ammo sound skipped because the game SFX mixer was unavailable");
+                return null;
             }
-            var holder = new GameObject("AmmoFiringSound");
-            holder.transform.position = position;
+            var holder = new GameObject(name);
             var source = holder.AddComponent<AudioSource>();
             source.clip = clip;
             source.outputAudioMixerGroup = template.outputAudioMixerGroup;
@@ -161,7 +213,7 @@ namespace AmmoVariants
             source.volume = Plugin.FiringSoundVolume.Value;
             source.Play();
             UnityEngine.Object.Destroy(holder, clip.length + 0.1f);
-            if (Plugin.LogCounters.Value) Plugin.Log.LogInfo("ammo firing sound " + clip.name);
+            return holder;
         }
     }
 

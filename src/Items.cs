@@ -29,12 +29,20 @@ namespace AmmoVariants
             "BoltCarapace", "ArrowCarapace", "BoltBloodGold", "ArrowBloodGold"
         };
 
-        internal enum AmmoKind { None, Scatter, Piercing, Energy }
+        // explosive tiers: Ashlands (Charred), early (fire arrow, bone bolt) and plains (needle arrow, black metal bolt), arrow
+        // and bolt. Explosive.Tiers holds their looks.
+        internal static readonly string[] ExplosiveBases =
+        {
+            "ArrowCharred", "BoltCharred", "ArrowFire", "BoltBone", "ArrowNeedle", "BoltBlackmetal"
+        };
+
+        internal enum AmmoKind { None, Scatter, Piercing, Energy, Explosive }
 
         // the projectile prefabs of our ammo, looked up at launch.
         internal static readonly HashSet<GameObject> ScatterProjectiles = new HashSet<GameObject>();
         internal static readonly HashSet<GameObject> PiercingProjectiles = new HashSet<GameObject>();
         internal static readonly HashSet<GameObject> EnergyProjectiles = new HashSet<GameObject>();
+        internal static readonly HashSet<GameObject> ExplosiveProjectiles = new HashSet<GameObject>();
 
         internal static AmmoKind KindOf(ItemDrop.ItemData ammo)
         {
@@ -43,6 +51,7 @@ namespace AmmoVariants
             if (ScatterProjectiles.Contains(projectile)) return AmmoKind.Scatter;
             if (PiercingProjectiles.Contains(projectile)) return AmmoKind.Piercing;
             if (EnergyProjectiles.Contains(projectile)) return AmmoKind.Energy;
+            if (ExplosiveProjectiles.Contains(projectile)) return AmmoKind.Explosive;
             return AmmoKind.None;
         }
 
@@ -50,6 +59,11 @@ namespace AmmoVariants
         internal const string BlackForgePiece = "blackforge";
         internal const string EitrItem = "Eitr";
         internal const string FlintItem = "Flint";
+        internal const string SulfurItem = "SulfurStone";
+        internal const string CoalItem = "Coal";
+        internal const string SurtlingCoreItem = "SurtlingCore";
+        internal const string GuckItem = "Guck";
+        internal const string BlackMetalItem = "BlackMetal";
 
         // names of the recipes this mod added, for the log and for the known list.
         internal static readonly List<string> Recipes = new List<string>();
@@ -68,8 +82,8 @@ namespace AmmoVariants
 
             int items = Recipes.Count(r => ObjectDB.instance.GetItemPrefab(r.Replace("Recipe_", "")) != null);
             int found = Recipes.Count(r => ObjectDB.instance.m_recipes.Any(x => x != null && x.name == r));
-            int expected = (BoltBases.Length + ArrowBases.Length) * 2 + EnergyBases.Length;
-            int projectiles = ScatterProjectiles.Concat(PiercingProjectiles).Concat(EnergyProjectiles)
+            int expected = (BoltBases.Length + ArrowBases.Length) * 2 + EnergyBases.Length + ExplosiveBases.Length;
+            int projectiles = ScatterProjectiles.Concat(PiercingProjectiles).Concat(EnergyProjectiles).Concat(ExplosiveProjectiles)
                 .Count(p => ZNetScene.instance != null && ZNetScene.instance.GetPrefab(p.name) == p);
             if (Plugin.LogCounters.Value)
                 Plugin.Log.LogInfo($"ammo registration expected {expected}, items {items}, recipes {found}, network projectiles {projectiles}");
@@ -96,7 +110,47 @@ namespace AmmoVariants
             {
                 RegisterEnergy(b);
             }
+
+            Explosive.RegisterBlasts();
+            foreach (var b in ExplosiveBases)
+            {
+                RegisterExplosive(b);
+            }
             AmmoBallistaTrail.Register();
+        }
+
+        // the charred ammo with a molten charge and flames, slower and heavier, sticking on the hit and blowing after a fuse.
+        private static void RegisterExplosive(string baseName)
+        {
+            var name = baseName + "Explosive";
+            var basePrefab = PrefabManager.Instance.GetPrefab(baseName);
+            var baseProjectile = basePrefab?.GetComponent<ItemDrop>().m_itemData.m_shared.m_attack.m_attackProjectile;
+            if (baseProjectile == null)
+            {
+                Plugin.Log.LogWarning($"missing vanilla ammo or projectile {baseName}, {name} not added");
+                return;
+            }
+
+            var tier = Explosive.Tiers[baseName];
+            bool bolt = tier.Bolt;
+            var projectile = PrefabManager.Instance.CreateClonedPrefab(name + "Projectile", baseProjectile);
+            if (bolt) Lengthen(projectile, Explosive.BoltBodyLength);
+            Explosive.Decorate(projectile, tier);
+            ExplosiveProjectiles.Add(projectile);
+            AmmoModels.Decorate(projectile, "Explosive", AmmoModels.BoundsOf(baseProjectile).size.z);
+            projectile.AddComponent<AmmoFlight>();
+            PrefabManager.Instance.AddPrefab(projectile);
+
+            var item = PrefabManager.Instance.CreateClonedPrefab(name, basePrefab);
+            var shared = item.GetComponent<ItemDrop>().m_itemData.m_shared;
+            shared.m_name = "Explosive " + Pretty(baseName);
+            shared.m_attack.m_attackProjectile = projectile;
+            shared.m_icons = new[] { AmmoAssets.Icon(name) };
+            shared.m_description = "Sticks where it hits and explodes. Safe for you, friends and tames.";
+            AmmoModels.DropModel(item, projectile);
+
+            if (!ItemManager.Instance.AddItem(new CustomItem(item, true)))
+                Plugin.Log.LogError("could not register ammo item " + name);
         }
 
         // a scatter or piercing ammo: the vanilla ammo with its own projectile prefab.
@@ -159,8 +213,8 @@ namespace AmmoVariants
             itemDrop.m_itemData.m_shared.m_attack.m_attackProjectile = projectile;
             itemDrop.m_itemData.m_shared.m_icons = new[] { AmmoAssets.Icon(name) };
             itemDrop.m_itemData.m_shared.m_description = kind == "Scatter"
-                ? "Fires a spread of small projectiles. Bows fire fewer projectiles in a tighter cone."
-                : "Passes through creatures, losing damage after each. Stops on terrain and objects.";
+                ? (baseName.StartsWith("Bolt") ? $"A spread of {Plugin.ScatterPellets.Value} small bolts." : $"A spread of {Plugin.ScatterBowPellets.Value} small arrows.")
+                : $"Passes through up to {Plugin.PierceMaxCreatures.Value} creatures.";
             AmmoModels.DropModel(item, projectile);
 
             if (!ItemManager.Instance.AddItem(new CustomItem(item, true)))
@@ -225,7 +279,7 @@ namespace AmmoVariants
             };
             shared.m_attack.m_attackProjectile = projectile;
             shared.m_icons = new[] { AmmoAssets.Icon(name) };
-            shared.m_description = $"Flies straight through creatures and terrain. The full shot becomes {Plugin.EnergyLightningShare.Value * 100f:0}% lightning and {Plugin.EnergyPierceShare.Value * 100f:0}% pierce, with {Plugin.EnergyFireShare.Value * 100f:0}% fire added that sets targets burning. Damage falls from full at launch to 25% at 200 m, where flight ends.";
+            shared.m_description = "Flies straight through creatures and walls, weaker with distance.";
             AmmoModels.DropModel(item, projectile);
 
             if (!ItemManager.Instance.AddItem(new CustomItem(item, true)))
@@ -238,6 +292,54 @@ namespace AmmoVariants
             foreach (var baseName in BoltBases.Concat(ArrowBases))
                 foreach (var kind in new[] { "Scatter", "Piercing" }) RegisterRecipe(baseName, kind);
             foreach (var baseName in EnergyBases) RegisterRecipe(baseName, "Energy");
+            foreach (var baseName in ExplosiveBases) RegisterExplosiveRecipe(baseName);
+        }
+
+        // at the base ammo's own station: charred ammo with sulfur and coal, early ammo with a surtling core, coal and guck,
+        // plains ammo with black metal, a surtling core and coal.
+        private static void RegisterExplosiveRecipe(string baseName)
+        {
+            var db = ObjectDB.instance;
+            if (db == null) return;
+            var name = baseName + "Explosive";
+            bool early = Explosive.Tiers[baseName].Early;
+            bool plains = Explosive.Tiers[baseName].Plains;
+            var original = FindRecipe(baseName);
+            var item = db.GetItemPrefab(name)?.GetComponent<ItemDrop>();
+            var baseItem = db.GetItemPrefab(baseName)?.GetComponent<ItemDrop>();
+            var parts = (early
+                ? new[] { (SurtlingCoreItem, Plugin.RecipeEarlyExplosiveCore.Value), (CoalItem, Plugin.RecipeEarlyExplosiveCoal.Value), (GuckItem, Plugin.RecipeEarlyExplosiveGuck.Value) }
+                : plains
+                ? new[] { (BlackMetalItem, Plugin.RecipePlainsExplosiveBlackMetal.Value), (SurtlingCoreItem, Plugin.RecipePlainsExplosiveCore.Value), (CoalItem, Plugin.RecipePlainsExplosiveCoal.Value) }
+                : new[] { (SulfurItem, Plugin.RecipeExplosiveSulfur.Value), (CoalItem, Plugin.RecipeExplosiveCoal.Value) })
+                .Select(p => (name: p.Item1, drop: db.GetItemPrefab(p.Item1)?.GetComponent<ItemDrop>(), amount: p.Item2)).ToArray();
+            if (item == null || baseItem == null || parts.Any(p => p.drop == null) || original == null || original.m_craftingStation == null)
+            {
+                Plugin.Log.LogError($"recipe {name} unavailable, item {item != null}, base {baseItem != null}, {string.Join(", ", parts.Select(p => p.name + " " + (p.drop != null)))}, original {original != null}");
+                return;
+            }
+            string recipeName = "Recipe_" + name;
+            var recipe = db.m_recipes.FirstOrDefault(r => r != null && r.name == recipeName);
+            bool added = recipe == null;
+            if (added) recipe = ScriptableObject.CreateInstance<Recipe>();
+            recipe.name = recipeName;
+            recipe.m_item = item;
+            recipe.m_enabled = true;
+            recipe.m_craftingStation = original.m_craftingStation;
+            recipe.m_minStationLevel = original.m_minStationLevel;
+            recipe.m_amount = early ? Plugin.RecipeEarlyExplosiveYield.Value : plains ? Plugin.RecipePlainsExplosiveYield.Value : Plugin.RecipeExplosiveYield.Value;
+            recipe.m_resources = new[] { new Piece.Requirement { m_resItem = baseItem, m_amount = early ? Plugin.RecipeEarlyExplosiveBase.Value : plains ? Plugin.RecipePlainsExplosiveBase.Value : Plugin.RecipeExplosiveBase.Value } }
+                .Concat(parts.Select(p => new Piece.Requirement { m_resItem = p.drop, m_amount = p.amount })).ToArray();
+            if (!Recipes.Contains(recipeName))
+            {
+                if (!ItemManager.Instance.AddRecipe(new CustomRecipe(recipe, false, false)))
+                {
+                    Plugin.Log.LogError("could not register ammo recipe " + recipeName);
+                    return;
+                }
+                Recipes.Add(recipeName);
+            }
+            if (added) db.m_recipes.Add(recipe);
         }
 
         private static void RegisterRecipe(string baseName, string kind)
@@ -390,6 +492,34 @@ namespace AmmoVariants
             {
                 if (recipe == null || !Recipes.Contains(recipe.name)) continue;
                 string name = recipe.name.Substring("Recipe_".Length);
+                if (name.EndsWith("Explosive"))
+                {
+                    var tier = Explosive.Tiers[name.Substring(0, name.Length - "Explosive".Length)];
+                    if (tier.Early)
+                    {
+                        recipe.m_amount = Plugin.RecipeEarlyExplosiveYield.Value;
+                        recipe.m_resources[0].m_amount = Plugin.RecipeEarlyExplosiveBase.Value;
+                        recipe.m_resources[1].m_amount = Plugin.RecipeEarlyExplosiveCore.Value;
+                        recipe.m_resources[2].m_amount = Plugin.RecipeEarlyExplosiveCoal.Value;
+                        recipe.m_resources[3].m_amount = Plugin.RecipeEarlyExplosiveGuck.Value;
+                    }
+                    else if (tier.Plains)
+                    {
+                        recipe.m_amount = Plugin.RecipePlainsExplosiveYield.Value;
+                        recipe.m_resources[0].m_amount = Plugin.RecipePlainsExplosiveBase.Value;
+                        recipe.m_resources[1].m_amount = Plugin.RecipePlainsExplosiveBlackMetal.Value;
+                        recipe.m_resources[2].m_amount = Plugin.RecipePlainsExplosiveCore.Value;
+                        recipe.m_resources[3].m_amount = Plugin.RecipePlainsExplosiveCoal.Value;
+                    }
+                    else
+                    {
+                        recipe.m_amount = Plugin.RecipeExplosiveYield.Value;
+                        recipe.m_resources[0].m_amount = Plugin.RecipeExplosiveBase.Value;
+                        recipe.m_resources[1].m_amount = Plugin.RecipeExplosiveSulfur.Value;
+                        recipe.m_resources[2].m_amount = Plugin.RecipeExplosiveCoal.Value;
+                    }
+                    continue;
+                }
                 bool energy = name.EndsWith("Energy");
                 bool scatter = name.EndsWith("Scatter");
                 string kind = energy ? "Energy" : scatter ? "Scatter" : "Piercing";

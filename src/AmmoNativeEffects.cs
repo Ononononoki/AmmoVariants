@@ -10,6 +10,7 @@ namespace AmmoVariants
         [SerializeField] private bool[] emit;
         [SerializeField] private Light[] lights;
         [SerializeField] private bool[] illuminate;
+        [SerializeField] private bool burnAfterHit;
         private bool started;
         private bool stopped;
         private Projectile projectile;
@@ -56,6 +57,9 @@ namespace AmmoVariants
                 Plugin.Log.LogInfo($"native ammo effects prepared {name}, particles {systems.Length}, trails {trails.Length}, lights {lights.Length}, size {scale:F2}, density {scale:F2}");
         }
 
+        // explosive shots keep their flames while stuck during the fuse, the blast removes them.
+        internal void KeepBurningAfterHit() { burnAfterHit = true; }
+
         internal void Begin()
         {
             if (started || stopped || systems == null) return;
@@ -83,7 +87,7 @@ namespace AmmoVariants
                 if (view != null && view.IsValid()) Begin();
                 return;
             }
-            if (stopped || projectile == null || !Shots.FlightEnded(projectile)) return;
+            if (stopped || burnAfterHit || projectile == null || !Shots.FlightEnded(projectile)) return;
             stopped = true;
             foreach (var system in systems) system.Stop(false, ParticleSystemStopBehavior.StopEmitting);
             foreach (var trail in trails) trail.emitting = false;
