@@ -1,6 +1,6 @@
 # AmmoVariants
 
-Scatter, piercing, energy and explosive ammunition for bows and crossbows. Adds 48 variants across vanilla ammo tiers, from wood and bone to Bloodgold.
+Scatter, piercing, energy and explosive ammunition for bows and crossbows, plus the reusable Yondu Arrow. Adds 49 variants across vanilla ammo tiers, from wood and bone to Bloodgold.
 
 ## What it does
 
@@ -8,7 +8,9 @@ Scatter, piercing, energy and explosive ammunition for bows and crossbows. Adds 
 - **Scatter bolts.** Fourteen small pellets per shot, each dealing about 11.43% of normal shot damage, for up to 160% before armor and resistances.
 - **Piercing.** Starts at 110% of normal shot damage and passes through up to four creatures, losing 15% of its remaining damage after each. No distance damage loss. Stops on ground, trees, rocks and structures. Each creature is hit once per projectile.
 - **Energy.** Flies straight through creatures and terrain. Full shot damage becomes 85% lightning and 15% pierce, plus 15% additional fire damage that sets targets burning. All three shares are in the config. Damage falls to 25% at 200 meters, where flight ends. No creature limit or damage loss per creature. Chop and pickaxe damage are excluded from conversion.
-- **Explosive.** A heavier charge that flies slower and drops more. It sticks in what it hits, dealing 30% of a shot as pierce and fire, and blows up 1.25 seconds later. The blast deals 125% of a full draw shot as 75% blunt and 25% fire, with chop and pickaxe damage at the tier's tool level, in full out to the core radius and at 40% out to the outer radius. It never hurts you, other players without PvP or tames, and leaves buildings, trees and rocks alone inside a workbench's range. Shots into water are duds.
+- **Explosive.** A heavier charge that flies slower and drops more. It sticks in what it hits, dealing 30% of a shot as pierce and fire, and blows up 1.25 seconds later. The blast deals 187.5% of a full draw shot as 75% blunt and 25% fire, with chop and pickaxe damage at the tier's tool level, in full out to the core radius and at 40% out to the outer radius. It never hurts you, other players without PvP or tames, and leaves buildings, trees and rocks alone inside a workbench's range. Shots into water are duds.
+- **Yondu Arrow.** One reusable Bloodgold arrow that stays in your inventory. It passes through enemies for the first half second, then hunts enemies within 50 m of you for up to 10 guided hits and flies back to you. It visits each enemy once before any enemy is hit again, ignores terrain, and adds the arrow's 90 pierce to your bow, draw and skill. The first hit on an enemy deals full damage, and each repeat on the same enemy deals 10% less. One Yondu Arrow can be in the air per player.
+- Each Yondu Arrow has 1000 durability and loses 1 per guided hit. The hit that uses the last point still lands, then it returns. Repair it at the Black Forge. A worn-out arrow cannot be fired.
 - Piercing and energy have an extra 0.35-meter hit radius against enemies. Piercing keeps a thin collision ray against terrain and objects.
 - Icons based on vanilla inventory sprites, native elemental flight effects and compact effects at held and dropped tips. Piercing and scatter trails match the material or element, energy keeps blue lightning. Separate bow and crossbow firing sounds retain the original weapon mechanism.
 - Optional material-colored trails for existing ballista bolts. Trail size follows the larger bolt. Ballista damage, targeting, flight and ammo use stay unchanged.
@@ -22,6 +24,7 @@ Scatter scales the complete weapon and ammo damage, including elemental damage. 
 | Scatter | 20 base ammo and a finishing material | 10 | Base ammo station and level |
 | Piercing | 20 base ammo and a reinforcing material | 20 | Base ammo station and level |
 | Energy | 20 Carapace or Bloodgold ammo and 5 refined Eitr | 10 | Black Forge |
+| Yondu Arrow | 20 Bloodgold, 5 refined Eitr, 1 Thunderblood Essence | 1 | Black Forge |
 | Explosive, early | 20 fire arrows or bone bolts, 1 Surtling core, 2 Coal, 1 Guck | 5 | Base ammo station and level |
 | Explosive, plains | 20 needle arrows or black metal bolts, 1 Black metal, 1 Surtling core, 2 Coal | 5 | Base ammo station and level |
 | Explosive, Ashlands | 20 Charred arrows or bolts, 3 Sulfur, 2 Coal | 5 | Black Forge |
@@ -56,6 +59,7 @@ The file is `BepInEx/config/com.onononoki.ammovariants.cfg`. Gameplay and recipe
 | `Trails.ShaftHeat` | true | Red-hot, charred and sooty shaft on early and plains explosive ammo, requires restart |
 | `Recipes.UnlockAllRecipes` | false | Bypass normal recipe discovery |
 | `Debug.LogCounters` | false | Troubleshooting logs |
+| `Debug.YonduTestDurability` | 1000 | Durability of new Yondu Arrows, for testing |
 
 Existing configs retain their saved values. For the release balance, set `Scatter.Pellets` to 14, `Scatter.CrossbowDamageShare` to 0.1142857 and `Piercing.MaxCreatures` to 4.
 

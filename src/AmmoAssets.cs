@@ -10,6 +10,11 @@ namespace AmmoVariants
 {
     internal static class AmmoAssets
     {
+        internal const int YonduTurnWhistles = 3;
+        internal const int YonduReturnWhistle = YonduTurnWhistles + 1;
+        internal const int YonduCatchWhistle = YonduReturnWhistle + 1;
+        private static AudioClip[] yonduWhistles;
+        internal static Texture2D YonduAlbedo;
         private static readonly Dictionary<string, Sprite> Icons = new Dictionary<string, Sprite>();
         private static readonly Dictionary<int, AudioClip[]> Sounds = new Dictionary<int, AudioClip[]>();
         internal const int ExplosiveBowSounds = 4;
@@ -53,6 +58,9 @@ namespace AmmoVariants
                 foreach (string kind in new[] { "Scatter", "Piercing" }) LoadIcon(baseName + kind);
             foreach (string baseName in Items.EnergyBases) LoadIcon(baseName + "Energy");
             foreach (string baseName in Items.ExplosiveBases) LoadIcon(baseName + "Explosive");
+            LoadIcon(YonduFlight.ItemName);
+            YonduAlbedo = LoadPng("yondu_albedo", true);
+            yonduWhistles = Enumerable.Range(0, YonduCatchWhistle + 1).Select(i => LoadWave("yondu_whistle_" + i)).ToArray();
             string[] soundNames = { "scatter_bow", "scatter_crossbow", "piercing_bow", "piercing_crossbow", "energy_bow", "energy_crossbow" };
             for (int i = 0; i < soundNames.Length; i++) Sounds.Add(i + 2, new[] { LoadWave(soundNames[i]) });
             // explosive firing picks one of several mechanical variations at random, codes follow Shots.ConsumeSound
@@ -76,18 +84,24 @@ namespace AmmoVariants
 
         private static void LoadIcon(string name)
         {
-            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            var texture = LoadPng(name, false);
+            var sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f));
+            sprite.name = name;
+            Icons.Add(name, sprite);
+        }
+
+        private static Texture2D LoadPng(string name, bool mipChain)
+        {
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain);
             var conversion = Type.GetType("UnityEngine.ImageConversion, UnityEngine.ImageConversionModule", true);
             var loader = conversion.GetMethods().First(m =>
             {
                 try { var p = m.GetParameters(); return m.Name == "LoadImage" && p.Length == 3 && p[1].ParameterType == typeof(byte[]); }
                 catch (TypeLoadException) { return false; }
             });
-            if (!(bool)loader.Invoke(null, new object[] { texture, Bytes(name + ".png"), false })) throw new InvalidOperationException("invalid icon " + name);
+            if (!(bool)loader.Invoke(null, new object[] { texture, Bytes(name + ".png"), false })) throw new InvalidOperationException("invalid texture " + name);
             texture.name = name;
-            var sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f));
-            sprite.name = name;
-            Icons.Add(name, sprite);
+            return texture;
         }
 
         internal static Sprite Icon(string name) { return Icons[name]; }
@@ -180,6 +194,14 @@ namespace AmmoVariants
             if (holder == null) return;
             holder.transform.position = position;
             if (Plugin.LogCounters.Value) Plugin.Log.LogInfo("ammo firing sound " + clip.name);
+        }
+
+        internal static void PlayYondu(int cue, Vector3 position)
+        {
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null
+                || yonduWhistles == null || cue < 0 || cue >= yonduWhistles.Length || Plugin.FiringSoundVolume.Value <= 0f) return;
+            var sound = Sound("YonduWhistle", yonduWhistles[cue], "sfx_bow_fire");
+            if (sound != null) sound.transform.position = position;
         }
 
         // the fuse hiss rides on the stuck shot, the blast removes it with the shot.

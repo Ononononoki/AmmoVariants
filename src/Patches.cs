@@ -4,6 +4,15 @@ using UnityEngine;
 
 namespace AmmoVariants
 {
+    [HarmonyPatch(typeof(Attack), "UseAmmo")]
+    internal static class YonduAmmoUsePatch
+    {
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions, System.Reflection.Emit.ILGenerator generator)
+        {
+            return YonduFlight.GuardAmmo(instructions, generator);
+        }
+    }
+
     [HarmonyPatch(typeof(Attack), "ProjectileAttackTriggered")]
     internal static class AttackProjectileTriggerPatch
     {
@@ -133,9 +142,16 @@ namespace AmmoVariants
     [HarmonyPatch(typeof(Projectile), "FixedUpdate")]
     internal static class ProjectileUpdatePatch
     {
-        private static void Prefix(Projectile __instance)
+        private static bool Prefix(Projectile __instance)
         {
+            var yondu = __instance.GetComponent<YonduFlight>();
+            if (yondu != null)
+            {
+                yondu.Tick();
+                return false;
+            }
             Shots.BeforeUpdate(__instance);
+            return true;
         }
 
         private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)

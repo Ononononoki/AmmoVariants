@@ -43,6 +43,9 @@ namespace AmmoVariants
         internal const float BoltBodyLength = 1.2f;
         internal const float MinimumDraw = 0.05f;
         internal const float StayAfterFuse = 2f;
+        internal const float DefaultBlastBluntShare = 1.40625f;
+        internal const float DefaultBlastFireShare = 0.46875f;
+        internal const float DefaultBlastToolShare = 1.875f;
         internal const string WorkbenchName = "$piece_workbench";
         private const string ChargeSource = "bombdynamite_projectile";
         private const string CoreSource = "SurtlingCore";

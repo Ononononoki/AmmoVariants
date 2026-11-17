@@ -14,6 +14,7 @@ namespace AmmoVariants
         private float[] distances;
         private float began = -1f;
         private bool energy;
+        internal bool Yondu;
         private Mesh mesh;
         private Transform meshTransform;
         private MeshRenderer meshRenderer;
@@ -78,7 +79,9 @@ namespace AmmoVariants
                 energyObject.AddComponent<MeshFilter>().sharedMesh = mesh;
                 meshRenderer = energyObject.AddComponent<MeshRenderer>();
                 var particleMaterial = particles != null ? particles.GetComponent<ParticleSystemRenderer>().trailMaterial : null;
-                meshRenderer.sharedMaterials = new[] { source.sharedMaterial, particleMaterial != null ? particleMaterial : source.sharedMaterial };
+                meshRenderer.sharedMaterials = Yondu
+                    ? new[] { AmmoPalette.DarkMaterial(), AmmoPalette.DarkMaterial() }
+                    : new[] { source.sharedMaterial, particleMaterial != null ? particleMaterial : source.sharedMaterial };
                 meshRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
                 meshRenderer.receiveShadows = false;
                 return;
@@ -115,7 +118,7 @@ namespace AmmoVariants
                 sparks = new Vector3[count];
                 for (int i = 0; i < count; i++) sparks[i] = Spark(points[i], i);
             }
-            if (Plugin.LogCounters.Value) Plugin.Log.LogInfo($"ammo path released, points {count}, length {(count > 0 ? distances[count - 1] : 0f):F1}, segment aging true, energy {energy}, fade {(energy ? AmmoVisuals.FadeSeconds : AmmoVisuals.PiercingFadeSeconds):F1}");
+            if (Plugin.LogCounters.Value) Plugin.Log.LogInfo($"ammo path released, points {count}, length {(count > 0 ? distances[count - 1] : 0f):F1}, segment aging true, energy {energy}, fade {(Yondu ? AmmoVisuals.YonduFadeSeconds : energy ? AmmoVisuals.FadeSeconds : AmmoVisuals.PiercingFadeSeconds):F1}");
         }
 
         internal void RecordPoint(Vector3 point)
@@ -134,7 +137,17 @@ namespace AmmoVariants
 
         internal static float EnergyAlpha(float age)
         {
-            float t = (float)System.Math.Max(0d, System.Math.Min(1d, (age - AmmoVisuals.TrailHoldSeconds) / AmmoVisuals.FadeSeconds));
+            return SegmentAlpha(age, AmmoVisuals.TrailHoldSeconds, AmmoVisuals.FadeSeconds);
+        }
+
+        internal static float YonduAlpha(float age)
+        {
+            return SegmentAlpha(age, AmmoVisuals.YonduHoldSeconds, AmmoVisuals.YonduFadeSeconds);
+        }
+
+        private static float SegmentAlpha(float age, float hold, float fade)
+        {
+            float t = (float)System.Math.Max(0d, System.Math.Min(1d, (age - hold) / fade));
             return 1f - t * t * (3f - 2f * t);
         }
 
@@ -191,12 +204,16 @@ namespace AmmoVariants
                 var facing = camera != null ? camera.transform.position - samples[i] : Vector3.forward;
                 var side = Vector3.Cross(direction, facing).normalized;
                 if (side.sqrMagnitude < 0.001f) side = Vector3.up;
-                float alpha = EnergyAlpha(Time.time - times[i]);
+                float age = Time.time - times[i];
+                float alpha = Yondu ? YonduAlpha(age) : EnergyAlpha(age);
                 for (int ribbon = 0; ribbon < 2; ribbon++)
                 {
                     var point = ribbon == 0 ? samples[i] : Spark(samples[i], i);
                     float half = (ribbon == 0 ? EnergyWidth : LightningWidth) * 0.5f;
-                    var color = ribbon == 0 ? new Color(0.35f,0.65f,1f,alpha * EnergyOpacity) : new Color(0.45f,0.75f,1f,alpha * 0.75f);
+                    var color = Yondu
+                        ? ribbon == 0 ? YonduFlight.StreakColor : YonduFlight.RibbonColor
+                        : ribbon == 0 ? new Color(0.35f,0.65f,1f,EnergyOpacity) : new Color(0.45f,0.75f,1f,0.75f);
+                    color.a *= alpha;
                     for (int row = 0; row < 3; row++)
                     {
                         vertices.Add(inverse.MultiplyPoint3x4(point + side * ((row - 1) * half)));
@@ -246,7 +263,9 @@ namespace AmmoVariants
             if (energy)
             {
                 RenderEnergy();
-                if (began >= 0f && times.Count > 0 && Time.time - times[times.Count - 1] >= AmmoVisuals.EnergyHoldSeconds + AmmoVisuals.FadeSeconds) Destroy(gameObject);
+                float lifetime = Yondu ? AmmoVisuals.YonduHoldSeconds + AmmoVisuals.YonduFadeSeconds
+                    : AmmoVisuals.EnergyHoldSeconds + AmmoVisuals.FadeSeconds;
+                if (began >= 0f && times.Count > 0 && Time.time - times[times.Count - 1] >= lifetime) Destroy(gameObject);
                 return;
             }
             if (began >= 0f)

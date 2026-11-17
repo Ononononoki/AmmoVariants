@@ -17,7 +17,7 @@ namespace AmmoVariants
     {
         public const string ModGuid = "com.onononoki.ammovariants";
         public const string ModName = "AmmoVariants";
-        public const string ModVersion = "1.1.0";
+        public const string ModVersion = "1.2.0";
 
         internal static Plugin Instance;
         internal static BepInEx.Logging.ManualLogSource Log;
@@ -100,6 +100,7 @@ namespace AmmoVariants
         internal static ConfigEntry<int> RecipePlainsExplosiveYield;
         internal static ConfigEntry<bool> UnlockAllRecipes;
         internal static ConfigEntry<bool> LogCounters;
+        internal static ConfigEntry<int> YonduTestDurability;
 
         private void Awake()
         {
@@ -193,13 +194,13 @@ namespace AmmoVariants
                 new ConfigDescription("Fire damage on impact as a share of the shot's combat damage as fired.", new AcceptableValueRange<float>(0f, 2f), sync));
             ExplosiveImpactToolShare = Config.Bind("Explosive", "ImpactToolShare", 0.30f,
                 new ConfigDescription("Share of the shot's own chop and pickaxe damage kept on impact.", new AcceptableValueRange<float>(0f, 2f), sync));
-            ExplosiveBlastBluntShare = Config.Bind("Explosive", "BlastBluntShare", 0.9375f,
-                new ConfigDescription("Blunt damage of the blast as a share of a full draw shot's combat damage, whatever the draw. 0.9375 is 75 percent of a 125 percent blast.", new AcceptableValueRange<float>(0f, 3f), sync));
-            ExplosiveBlastFireShare = Config.Bind("Explosive", "BlastFireShare", 0.3125f,
-                new ConfigDescription("Fire damage of the blast as a share of a full draw shot's combat damage. 0.3125 is 25 percent of a 125 percent blast.", new AcceptableValueRange<float>(0f, 3f), sync));
-            ExplosiveBlastChopShare = Config.Bind("Explosive", "BlastChopShare", 1.25f,
+            ExplosiveBlastBluntShare = Config.Bind("Explosive", "BlastBluntShare", Explosive.DefaultBlastBluntShare,
+                new ConfigDescription("Blunt damage of the blast as a share of a full draw shot's combat damage, whatever the draw. Blunt makes up 75 percent of the default blast.", new AcceptableValueRange<float>(0f, 3f), sync));
+            ExplosiveBlastFireShare = Config.Bind("Explosive", "BlastFireShare", Explosive.DefaultBlastFireShare,
+                new ConfigDescription("Fire damage of the blast as a share of a full draw shot's combat damage. Fire makes up 25 percent of the default blast.", new AcceptableValueRange<float>(0f, 3f), sync));
+            ExplosiveBlastChopShare = Config.Bind("Explosive", "BlastChopShare", Explosive.DefaultBlastToolShare,
                 new ConfigDescription("Chop damage of the blast as a share of a full draw shot's combat damage.", new AcceptableValueRange<float>(0f, 3f), sync));
-            ExplosiveBlastPickaxeShare = Config.Bind("Explosive", "BlastPickaxeShare", 1.25f,
+            ExplosiveBlastPickaxeShare = Config.Bind("Explosive", "BlastPickaxeShare", Explosive.DefaultBlastToolShare,
                 new ConfigDescription("Pickaxe damage of the blast as a share of a full draw shot's combat damage.", new AcceptableValueRange<float>(0f, 3f), sync));
             ExplosiveFuse = Config.Bind("Explosive", "FuseSeconds", 1.25f,
                 new ConfigDescription("Seconds from the hit to the blast.", new AcceptableValueRange<float>(0.1f, 5f), sync));
@@ -292,6 +293,8 @@ namespace AmmoVariants
 
             LogCounters = Config.Bind("Debug", "LogCounters", false,
                 "Writes a log line for every changed shot, pass and energy hit.");
+            YonduTestDurability = Config.Bind("Debug", "YonduTestDurability", 1000,
+                new ConfigDescription("Durability of Yondu Arrows. Lower it to test zero durability and repair. Restart the game, then spawn new arrows.", new AcceptableValueRange<int>(1, 1000)));
 
             foreach (var pair in RecipeRules.Rules)
             {
@@ -313,6 +316,7 @@ namespace AmmoVariants
                 Config.Save();
             }
 
+            MigrateBalance(Config);
             AmmoTrailSettings.Bind(Config);
             Items.Hook();
             Shots.Init();
@@ -321,6 +325,36 @@ namespace AmmoVariants
             harmony.PatchAll(Assembly.GetExecutingAssembly());
             AmmoCompatibility.Init(harmony);
             Config.SettingChanged += (sender, args) => Items.RefreshRecipes();
+        }
+
+        internal static void MigrateBalance(ConfigFile config)
+        {
+            bool saveOnSet = config.SaveOnConfigSet;
+            config.SaveOnConfigSet = false;
+            try
+            {
+                var migrated = config.Bind("Migrations", "BlastDamage1044", false, "Records the one-time blast damage update.");
+                if (migrated.Value) return;
+
+                ExplosiveBlastBluntShare.Value = Explosive.DefaultBlastBluntShare;
+                ExplosiveBlastFireShare.Value = Explosive.DefaultBlastFireShare;
+                ExplosiveBlastChopShare.Value = Explosive.DefaultBlastToolShare;
+                ExplosiveBlastPickaxeShare.Value = Explosive.DefaultBlastToolShare;
+                if (AccessTools.Property(typeof(ConfigFile), "OrphanedEntries")?.GetValue(config) is
+                    System.Collections.Generic.IDictionary<ConfigDefinition, string> oldEntries)
+                {
+                    oldEntries.Remove(new ConfigDefinition("Yondu", "HitShare"));
+                    oldEntries.Remove(new ConfigDefinition("Yondu", "RepeatHitShare"));
+                    oldEntries.Remove(new ConfigDefinition("Yondu", "Cooldown"));
+                }
+                migrated.Value = true;
+                config.Save();
+                Log.LogInfo("applied one-time explosive damage update");
+            }
+            finally
+            {
+                config.SaveOnConfigSet = saveOnSet;
+            }
         }
 
         internal static T RecipeValue<T>(string baseName, string key)

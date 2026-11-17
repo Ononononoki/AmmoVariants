@@ -21,6 +21,7 @@
     <Compile Remove="tools\**" />
     <Compile Remove="diagnostics\**" />
     <EmbeddedResource Include="art\icons\*.png" />
+    <EmbeddedResource Include="art\models\yondu_albedo.png" />
     <EmbeddedResource Include="art\audio\*.wav" />
     <EmbeddedResource Include="art\ammo_visuals" />
     <Reference Include="UnityEngine.AudioModule"><HintPath>$(Managed)\UnityEngine.AudioModule.dll</HintPath><Private>false</Private></Reference>

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+- New reusable Yondu Arrow, made at the Black Forge from 20 Bloodgold, 5 refined Eitr and 1 Thunderblood Essence. It stays in your inventory and flies back after each shot.
+- After release it passes through enemies for half a second, then hunts enemies within 50 m for up to 10 guided hits, one enemy at a time before repeating any. Each repeat on the same enemy deals 10% less.
+- Each Yondu Arrow has 1000 durability, 1 per guided hit, repaired at the Black Forge. The last point still lands its hit.
+- Each Yondu hit raises your bow skill by one tenth of a normal arrow hit.
+- Explosive blast damage is 50% higher for all six explosive ammo. Existing configs get the four new blast values once at startup.
+- Scatter and explosive bolt icons are longer and easier to read.
+- Needs the same version on the server and every player.
+
 ## 1.1.0
 
 - New explosive arrows and bolts in three tiers: fire arrow and bone bolt, needle arrow and black metal bolt, Charred arrow and bolt.

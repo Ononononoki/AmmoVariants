@@ -38,9 +38,9 @@ namespace AmmoVariants
         internal static void Decorate(GameObject projectile, string kind, float originalLength)
         {
             Lengths[projectile] = originalLength * (kind == "Piercing" ? Plugin.PierceBodyLength.Value : kind == "Scatter" ? (projectile.name.StartsWith("Arrow") ? ScatterArrowBodyLength : ScatterBodyLength)
-                : kind == "Explosive" && projectile.name.StartsWith("Bolt") ? Explosive.BoltBodyLength : 1f);
-            // the explosive charge sits behind the tip, the colored head is left out
-            if (kind == "Explosive") return;
+                : kind == "Explosive" && projectile.name.StartsWith("Bolt") ? Explosive.BoltBodyLength : kind == "Yondu" ? YonduFlight.BodyLength : 1f);
+            // explosive and yondu use the native head
+            if (kind == "Explosive" || kind == "Yondu") return;
             var bounds = BoundsOf(projectile);
             float length = Mathf.Max(bounds.size.z, 0.1f);
             var head = new GameObject("AmmoHead"); head.transform.SetParent(projectile.transform, false);
@@ -109,7 +109,8 @@ namespace AmmoVariants
                 system.Stop(false,ParticleSystemStopBehavior.StopEmittingAndClear);
             }
             foreach (var light in item.GetComponentsInChildren<Light>(true)) light.enabled = false;
-            var bundle = Visual(projectile, !Items.PiercingProjectiles.Contains(projectile) && !Items.ExplosiveProjectiles.Contains(projectile));
+            var bundle = Visual(projectile, !Items.PiercingProjectiles.Contains(projectile) && !Items.ExplosiveProjectiles.Contains(projectile)
+                && !Items.YonduProjectiles.Contains(projectile));
             bundle.name = "AmmoBundle";
             bundle.transform.SetParent(item.transform, false);
             bundle.transform.localRotation = Quaternion.identity;

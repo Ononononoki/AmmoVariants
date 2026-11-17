@@ -12,6 +12,8 @@ namespace AmmoVariants
         internal const float ImpactFeather = 1f;
         internal const float TrailHoldSeconds = 1f;
         internal const float EnergyHoldSeconds = TrailHoldSeconds;
+        internal const float YonduHoldSeconds = 2f;
+        internal const float YonduFadeSeconds = 1.5f;
         internal const float EnergyTrailWidth = 0.055f;
         internal const int MaximumPathPoints = 2048;
         internal const float MinimumDistance = 0.02f;

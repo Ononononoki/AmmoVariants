@@ -36,13 +36,14 @@ namespace AmmoVariants
             "ArrowCharred", "BoltCharred", "ArrowFire", "BoltBone", "ArrowNeedle", "BoltBlackmetal"
         };
 
-        internal enum AmmoKind { None, Scatter, Piercing, Energy, Explosive }
+        internal enum AmmoKind { None, Scatter, Piercing, Energy, Explosive, Yondu }
 
         // the projectile prefabs of our ammo, looked up at launch.
         internal static readonly HashSet<GameObject> ScatterProjectiles = new HashSet<GameObject>();
         internal static readonly HashSet<GameObject> PiercingProjectiles = new HashSet<GameObject>();
         internal static readonly HashSet<GameObject> EnergyProjectiles = new HashSet<GameObject>();
         internal static readonly HashSet<GameObject> ExplosiveProjectiles = new HashSet<GameObject>();
+        internal static readonly HashSet<GameObject> YonduProjectiles = new HashSet<GameObject>();
 
         internal static AmmoKind KindOf(ItemDrop.ItemData ammo)
         {
@@ -52,12 +53,17 @@ namespace AmmoVariants
             if (PiercingProjectiles.Contains(projectile)) return AmmoKind.Piercing;
             if (EnergyProjectiles.Contains(projectile)) return AmmoKind.Energy;
             if (ExplosiveProjectiles.Contains(projectile)) return AmmoKind.Explosive;
+            if (YonduProjectiles.Contains(projectile)) return AmmoKind.Yondu;
             return AmmoKind.None;
         }
 
         internal const string WorkbenchPiece = "piece_workbench";
         internal const string BlackForgePiece = "blackforge";
         internal const string EitrItem = "Eitr";
+        internal static readonly (string Prefab, int Amount)[] YonduRecipe =
+        {
+            ("Gold", 20), (EitrItem, 5), ("OrbThunderBlood", 1)
+        };
         internal const string FlintItem = "Flint";
         internal const string SulfurItem = "SulfurStone";
         internal const string CoalItem = "Coal";
@@ -82,8 +88,8 @@ namespace AmmoVariants
 
             int items = Recipes.Count(r => ObjectDB.instance.GetItemPrefab(r.Replace("Recipe_", "")) != null);
             int found = Recipes.Count(r => ObjectDB.instance.m_recipes.Any(x => x != null && x.name == r));
-            int expected = (BoltBases.Length + ArrowBases.Length) * 2 + EnergyBases.Length + ExplosiveBases.Length;
-            int projectiles = ScatterProjectiles.Concat(PiercingProjectiles).Concat(EnergyProjectiles).Concat(ExplosiveProjectiles)
+            int expected = (BoltBases.Length + ArrowBases.Length) * 2 + EnergyBases.Length + ExplosiveBases.Length + YonduFlight.ItemCount;
+            int projectiles = ScatterProjectiles.Concat(PiercingProjectiles).Concat(EnergyProjectiles).Concat(ExplosiveProjectiles).Concat(YonduProjectiles)
                 .Count(p => ZNetScene.instance != null && ZNetScene.instance.GetPrefab(p.name) == p);
             if (Plugin.LogCounters.Value)
                 Plugin.Log.LogInfo($"ammo registration expected {expected}, items {items}, recipes {found}, network projectiles {projectiles}");
@@ -110,6 +116,7 @@ namespace AmmoVariants
             {
                 RegisterEnergy(b);
             }
+            RegisterEnergy(YonduFlight.BaseItem, true);
 
             Explosive.RegisterBlasts();
             foreach (var b in ExplosiveBases)
@@ -222,9 +229,9 @@ namespace AmmoVariants
         }
 
         // ammo contributes its original total before the full-shot fire bonus.
-        private static void RegisterEnergy(string baseName)
+        private static void RegisterEnergy(string baseName, bool yondu = false)
         {
-            var name = baseName + "Energy";
+            var name = yondu ? YonduFlight.ItemName : baseName + "Energy";
             var basePrefab = PrefabManager.Instance.GetPrefab(baseName);
             if (basePrefab == null)
             {
@@ -243,43 +250,75 @@ namespace AmmoVariants
 
             var projectile = PrefabManager.Instance.CreateClonedPrefab(name + "Projectile", baseProjectile);
             var energy = projectile.GetComponent<Projectile>();
-            projectile.AddComponent<AmmoNativeEffects>().Prepare(1f);
-            energy.m_gravity = 0f;
-            // energy passes creatures, the vanilla hit would destroy it on the first one.
-            energy.m_stayAfterHitDynamic = true;
-            EnergyProjectiles.Add(projectile);
+            if (yondu)
+            {
+                YonduProjectiles.Add(projectile);
+                AmmoVisuals.SuppressInherited(projectile);
+                Lengthen(projectile, YonduFlight.BodyLength);
+                projectile.AddComponent<YonduFlight>();
+            }
+            else
+            {
+                projectile.AddComponent<AmmoNativeEffects>().Prepare(1f);
+                energy.m_gravity = 0f;
+                // energy passes creatures, the vanilla hit would destroy it on the first one.
+                energy.m_stayAfterHitDynamic = true;
+                EnergyProjectiles.Add(projectile);
+            }
             foreach (var renderer in projectile.GetComponentsInChildren<Renderer>(true))
             {
                 if (renderer is ParticleSystemRenderer || renderer is TrailRenderer) continue;
-                renderer.materials = renderer.materials.Select(m => Tinted(m, Plugin.EnergyColor.Value)).ToArray();
+                if (yondu)
+                    renderer.sharedMaterials = renderer.sharedMaterials.Select(m => new Material(m) { mainTexture = AmmoAssets.YonduAlbedo, color = Color.white }).ToArray();
+                else
+                    renderer.materials = renderer.materials.Select(m => Tinted(m, Plugin.EnergyColor.Value)).ToArray();
             }
-            var energyStart = Plugin.EnergyColor.Value;
+            var energyStart = yondu ? YonduFlight.StreakColor : Plugin.EnergyColor.Value;
             energyStart.a = EnergyTrailOpacity;
             var energyEnd = new Color(energyStart.r, energyStart.g, energyStart.b, 0f);
-            if (AmmoTrailSettings.Energy)
+            if (yondu || AmmoTrailSettings.Energy)
             {
                 AddTrail(projectile, energyStart, energyEnd, EnergyTrailWidth, EnergyTrailSeconds, true);
-                projectile.AddComponent<AmmoTrailLifetime>().Energy = true;
+                if (yondu) YonduFlight.AddSparks(projectile);
+                var lifetime = projectile.AddComponent<AmmoTrailLifetime>();
+                lifetime.Energy = true;
+                lifetime.Yondu = yondu;
             }
-            AddDot(projectile, DotBlue, MarkerSize);
-            AmmoModels.Decorate(projectile, "Energy", AmmoModels.BoundsOf(baseProjectile).size.z);
-            projectile.AddComponent<AmmoFlight>();
+            AddDot(projectile, yondu ? DotRed : DotBlue, MarkerSize);
+            AmmoModels.Decorate(projectile, yondu ? "Yondu" : "Energy", AmmoModels.BoundsOf(baseProjectile).size.z);
+            if (!yondu) projectile.AddComponent<AmmoFlight>();
             PrefabManager.Instance.AddPrefab(projectile);
 
             var item = PrefabManager.Instance.CreateClonedPrefab(name, basePrefab);
             var itemDrop = item.GetComponent<ItemDrop>();
             var shared = itemDrop.m_itemData.m_shared;
-            shared.m_name = "Energy " + Pretty(baseName);
+            shared.m_name = yondu ? "Yondu Arrow" : "Energy " + Pretty(baseName);
+            if (yondu)
+            {
+                shared.m_maxStackSize = 1;
+                shared.m_autoStack = false;
+                shared.m_attackForce = 0f;
+                shared.m_useDurability = true;
+                shared.m_canBeReparied = true;
+                shared.m_destroyBroken = false;
+                shared.m_maxDurability = YonduFlight.MaxDurability;
+                shared.m_durabilityPerLevel = 0f;
+                shared.m_useDurabilityDrain = 0f;
+                shared.m_durabilityDrain = 0f;
+                itemDrop.m_itemData.m_durability = YonduFlight.MaxDurability;
+            }
 
             float pierce = baseShared.m_damages.m_pierce;
-            shared.m_damages = new HitData.DamageTypes
+            shared.m_damages = yondu ? new HitData.DamageTypes { m_pierce = YonduFlight.BasePierce } : new HitData.DamageTypes
             {
                 m_lightning = pierce * Plugin.EnergyLightningShare.Value,
                 m_pierce = pierce * Plugin.EnergyPierceShare.Value
             };
             shared.m_attack.m_attackProjectile = projectile;
             shared.m_icons = new[] { AmmoAssets.Icon(name) };
-            shared.m_description = "Flies straight through creatures and walls, weaker with distance.";
+            shared.m_description = yondu
+                ? "Reusable. Passes through enemies on release, then seeks up to ten hits and returns. Guided hits spend durability. Each guided repeat on the same enemy deals 10% less."
+                : "Flies straight through creatures and walls, weaker with distance.";
             AmmoModels.DropModel(item, projectile);
 
             if (!ItemManager.Instance.AddItem(new CustomItem(item, true)))
@@ -292,6 +331,7 @@ namespace AmmoVariants
             foreach (var baseName in BoltBases.Concat(ArrowBases))
                 foreach (var kind in new[] { "Scatter", "Piercing" }) RegisterRecipe(baseName, kind);
             foreach (var baseName in EnergyBases) RegisterRecipe(baseName, "Energy");
+            RegisterRecipe(YonduFlight.BaseItem, "Yondu");
             foreach (var baseName in ExplosiveBases) RegisterExplosiveRecipe(baseName);
         }
 
@@ -350,13 +390,20 @@ namespace AmmoVariants
             var original = FindRecipe(baseName);
             var item = db.GetItemPrefab(name)?.GetComponent<ItemDrop>();
             var baseItem = db.GetItemPrefab(baseName)?.GetComponent<ItemDrop>();
+            bool yondu = kind == "Yondu";
             bool energy = kind == "Energy";
-            var materialName = energy ? EitrItem : Plugin.RecipeValue<string>(baseName, kind + "Material");
+            var materialName = yondu || energy ? EitrItem : Plugin.RecipeValue<string>(baseName, kind + "Material");
             var material = db.GetItemPrefab(materialName)?.GetComponent<ItemDrop>();
-            var station = energy ? PrefabManager.Instance.GetPrefab(BlackForgePiece)?.GetComponent<CraftingStation>() : original?.m_craftingStation;
-            if (item == null || baseItem == null || material == null || original == null || station == null)
+            var yonduParts = yondu ? YonduRecipe.Select(part => new Piece.Requirement
             {
-                Plugin.Log.LogError($"recipe {name} unavailable, item {item != null}, base {baseItem != null}, material {materialName} {material != null}, original {original != null}, station {station != null}");
+                m_resItem = db.GetItemPrefab(part.Prefab)?.GetComponent<ItemDrop>(),
+                m_amount = part.Amount
+            }).ToArray() : null;
+            var station = energy || yondu ? PrefabManager.Instance.GetPrefab(BlackForgePiece)?.GetComponent<CraftingStation>() : original?.m_craftingStation;
+            bool ingredientsFound = yondu ? yonduParts.All(part => part.m_resItem != null) : baseItem != null && material != null;
+            if (item == null || !ingredientsFound || original == null || station == null)
+            {
+                Plugin.Log.LogError($"recipe {name} unavailable, item {item != null}, ingredients {ingredientsFound}, original {original != null}, station {station != null}");
                 return;
             }
             string recipeName = "Recipe_" + name;
@@ -368,8 +415,8 @@ namespace AmmoVariants
             recipe.m_enabled = true;
             recipe.m_craftingStation = station;
             recipe.m_minStationLevel = original.m_minStationLevel;
-            recipe.m_amount = energy ? Plugin.RecipeEnergyYield.Value : kind == "Scatter" ? Plugin.RecipeScatterYield.Value : Plugin.RecipePierceYield.Value;
-            recipe.m_resources = new[]
+            recipe.m_amount = yondu ? 1 : energy ? Plugin.RecipeEnergyYield.Value : kind == "Scatter" ? Plugin.RecipeScatterYield.Value : Plugin.RecipePierceYield.Value;
+            recipe.m_resources = yonduParts ?? new[]
             {
                 new Piece.Requirement { m_resItem = energy ? material : baseItem, m_amount = energy ? Plugin.RecipeEnergyEitr.Value : Plugin.RecipeScatterBase.Value },
                 new Piece.Requirement { m_resItem = energy ? baseItem : material, m_amount = energy ? Plugin.RecipeEnergyBase.Value : Plugin.RecipeValue<int>(baseName, kind + "Amount") }
@@ -492,6 +539,7 @@ namespace AmmoVariants
             {
                 if (recipe == null || !Recipes.Contains(recipe.name)) continue;
                 string name = recipe.name.Substring("Recipe_".Length);
+                if (name == YonduFlight.ItemName) continue;
                 if (name.EndsWith("Explosive"))
                 {
                     var tier = Explosive.Tiers[name.Substring(0, name.Length - "Explosive".Length)];

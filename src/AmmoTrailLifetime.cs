@@ -6,6 +6,7 @@ namespace AmmoVariants
     public sealed class AmmoTrailLifetime : MonoBehaviour
     {
         public bool Energy;
+        public bool Yondu;
         private TrailRenderer trail;
         private ParticleSystem lightning;
         private Projectile projectile;
@@ -30,7 +31,7 @@ namespace AmmoVariants
             started = true;
             projectile = GetComponent<Projectile>();
             if (trail == null) trail = transform.Find("AmmoTrail")?.GetComponent<TrailRenderer>();
-            if (Energy && transform.Find("AmmoLightning") == null) AmmoVisuals.AddLightning(gameObject);
+            if (Energy && !Yondu && transform.Find("AmmoLightning") == null) AmmoVisuals.AddLightning(gameObject);
             lightning = transform.Find("AmmoLightning")?.GetComponent<ParticleSystem>();
             if (trail == null) { Plugin.Log.LogWarning("ammo trail missing on " + name); return; }
             // an independent visual survives projectile hiding, pooling and destruction.
@@ -48,9 +49,10 @@ namespace AmmoVariants
                 lightning.Play(false);
             }
             path = trail.gameObject.AddComponent<AmmoTrailDissolve>();
+            path.Yondu = Yondu;
             path.Prepare(trail, lightning, Energy);
             if (Plugin.LogCounters.Value && Logged.Add(name))
-                Plugin.Log.LogInfo($"ammo trail started {name}, shader {trail.sharedMaterial.shader.name}, supported {trail.sharedMaterial.shader.isSupported}, segment hold {AmmoVisuals.TrailHoldSeconds:F2}, segment fade {AmmoVisuals.FadeSeconds:F2}, impact fade {(Energy ? AmmoVisuals.FadeSeconds : AmmoVisuals.PiercingFadeSeconds):F2}, lightning {lightning != null}");
+                Plugin.Log.LogInfo($"ammo trail started {name}, shader {trail.sharedMaterial.shader.name}, supported {trail.sharedMaterial.shader.isSupported}, segment hold {(Yondu ? AmmoVisuals.YonduHoldSeconds : AmmoVisuals.TrailHoldSeconds):F2}, segment fade {(Yondu ? AmmoVisuals.YonduFadeSeconds : AmmoVisuals.FadeSeconds):F2}, impact fade {(Yondu ? AmmoVisuals.YonduFadeSeconds : Energy ? AmmoVisuals.FadeSeconds : AmmoVisuals.PiercingFadeSeconds):F2}, lightning {lightning != null}");
         }
 
         private void LateUpdate()
@@ -66,7 +68,7 @@ namespace AmmoVariants
             trail.transform.position = transform.position;
             trail.transform.rotation = transform.rotation;
             elapsed += Time.deltaTime;
-            trail.time = elapsed + AmmoVisuals.FadeSeconds + CleanupMargin;
+            trail.time = elapsed + (Yondu ? AmmoVisuals.YonduFadeSeconds : AmmoVisuals.FadeSeconds) + CleanupMargin;
             if (trail.positionCount == 0 || Vector3.Distance(trail.GetPosition(trail.positionCount - 1), transform.position) >= AmmoVisuals.MinimumDistance)
                 RecordPoint(transform.position);
             if (elapsed >= DiagnosticDelay && Plugin.LogCounters.Value && Observed.Add(name))
@@ -80,7 +82,9 @@ namespace AmmoVariants
         internal void Detach()
         {
             var released = DetachTrail();
-            if (released != null) Destroy(released.gameObject, (Energy ? AmmoVisuals.EnergyHoldSeconds + AmmoVisuals.FadeSeconds : AmmoVisuals.PiercingFadeSeconds) + CleanupMargin);
+            float lifetime = Yondu ? AmmoVisuals.YonduHoldSeconds + AmmoVisuals.YonduFadeSeconds
+                : Energy ? AmmoVisuals.EnergyHoldSeconds + AmmoVisuals.FadeSeconds : AmmoVisuals.PiercingFadeSeconds;
+            if (released != null) Destroy(released.gameObject, lifetime + CleanupMargin);
         }
 
         private void RecordPoint(Vector3 point)
@@ -103,6 +107,7 @@ namespace AmmoVariants
             if (path == null)
             {
                 path = trail.gameObject.AddComponent<AmmoTrailDissolve>();
+                path.Yondu = Yondu;
                 path.Prepare(trail, lightning, Energy);
             }
             path.Release();

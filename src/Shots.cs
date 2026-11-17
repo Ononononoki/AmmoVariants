@@ -64,6 +64,7 @@ namespace AmmoVariants
 
         // the bow draw of the burst being fired, 1 for weapons without a draw.
         private static float burstDraw = 1f;
+        private static Attack burstAttack;
         private static readonly AccessTools.FieldRef<Humanoid, bool> SecondaryRef = AccessTools.FieldRefAccess<Humanoid, bool>("m_currentAttackIsSecondary");
 
         private static readonly FieldInfo RaySolids = AccessTools.Field(typeof(Projectile), "s_rayMaskSolids");
@@ -130,6 +131,7 @@ namespace AmmoVariants
 
         internal static void BeginBurst(Attack attack)
         {
+            burstAttack = attack;
             FiringSecondary = BsmInstalled && IsSecondary(attack);
             burstSoundPending = true;
             burstDraw = attack.m_bowDraw ? DrawRef(attack) : 1f;
@@ -137,6 +139,7 @@ namespace AmmoVariants
 
         internal static void EndBurst()
         {
+            burstAttack = null;
             FiringSecondary = false;
             burstSoundPending = false;
             burstDraw = 1f;
@@ -152,6 +155,7 @@ namespace AmmoVariants
         // the pellet count of a burst: scatter ammo fires the configured pellets, everything else the weapon's count.
         internal static int ProjectileCount(Attack attack)
         {
+            if (Items.KindOf(AmmoItemRef(attack)) == Items.AmmoKind.Yondu) return 1;
             if (FiringSecondary || Items.KindOf(AmmoItemRef(attack)) != Items.AmmoKind.Scatter)
             {
                 return attack.m_projectiles;
@@ -231,10 +235,16 @@ namespace AmmoVariants
 
         internal static RaycastHit[] RaycastAll(Vector3 origin, Vector3 direction, float distance, int mask, Projectile projectile)
         {
-            var hits = Physics.RaycastAll(origin, direction, distance, mask);
             if (States.TryGetValue(projectile, out var state) && state.Kind == Items.AmmoKind.Energy)
-                return Widen(projectile, origin, direction, distance, mask, System.Array.FindAll(hits, hit => CharacterOf(hit.collider) != null));
-            return Widen(projectile, origin, direction, distance, mask, hits);
+                return EnergyHits(projectile, origin, direction, distance, mask);
+            return Widen(projectile, origin, direction, distance, mask, Physics.RaycastAll(origin, direction, distance, mask));
+        }
+
+        internal static RaycastHit[] EnergyHits(Projectile projectile, Vector3 origin, Vector3 direction, float distance, int mask)
+        {
+            var hits = Physics.RaycastAll(origin, direction, distance, mask);
+            return ExpandHits(projectile, origin, direction, distance, mask,
+                System.Array.FindAll(hits, hit => CharacterOf(hit.collider) != null), true);
         }
 
         internal static RaycastHit[] SphereCastAll(Vector3 origin, float radius, Vector3 direction, float distance, int mask, Projectile projectile)
@@ -249,9 +259,13 @@ namespace AmmoVariants
 
         private static RaycastHit[] Widen(Projectile projectile, Vector3 origin, Vector3 direction, float distance, int mask, RaycastHit[] hits)
         {
-            if (!States.TryGetValue(projectile, out var state) || (!state.Pierce && state.Kind != Items.AmmoKind.Energy)) return hits;
+            if (!States.TryGetValue(projectile, out var state) || !state.Pierce) return hits;
+            return ExpandHits(projectile, origin, direction, distance, mask, hits, false);
+        }
+
+        private static RaycastHit[] ExpandHits(Projectile projectile, Vector3 origin, Vector3 direction, float distance, int mask, RaycastHit[] hits, bool energy)
+        {
             var owner = OwnerRef(projectile);
-            bool energy = state.Kind == Items.AmmoKind.Energy;
             return PiercingCollision.Expand(origin, direction, distance, mask, hits, energy ? Plugin.EnergyEnemyRadius.Value : Plugin.PierceEnemyRadius.Value,
                 collider =>
                 {
@@ -275,6 +289,11 @@ namespace AmmoVariants
         {
             projectile.GetComponent<AmmoNativeEffects>()?.Begin();
             projectile.GetComponent<AmmoTrailLifetime>()?.Begin();
+            if (projectile.TryGetComponent<YonduFlight>(out var yondu))
+            {
+                yondu.Begin(OwnerRef(projectile) as Player, burstAttack, Vel(projectile), burstDraw);
+                return;
+            }
             var native = projectile.m_damage;
             var kind = KindOf(ammo);
             if (kind == Items.AmmoKind.None) { LogSetup(ammo, weapon, kind, native, native); States.Remove(projectile); return; }
@@ -429,7 +448,7 @@ namespace AmmoVariants
         }
 
         // a creature collider has the Character on its own object or on its rigidbody's object.
-        private static Character CharacterOf(Collider collider)
+        internal static Character CharacterOf(Collider collider)
         {
             if (collider == null) return null;
             var character = collider.GetComponentInParent<Character>();
@@ -547,6 +566,10 @@ namespace AmmoVariants
                     return Whole(EnergyDamage(shot, Plugin.EnergyLightningShare.Value, Plugin.EnergyPierceShare.Value, Plugin.EnergyFireShare.Value));
                 case Items.AmmoKind.Explosive:
                     return Whole(Explosive.ImpactDamage(shot, Plugin.ExplosiveImpactPierceShare.Value, Plugin.ExplosiveImpactFireShare.Value, Plugin.ExplosiveImpactToolShare.Value));
+                case Items.AmmoKind.Yondu:
+                    shot.m_chop = 0f;
+                    shot.m_pickaxe = 0f;
+                    return shot;
                 default:
                     return shot;
             }
